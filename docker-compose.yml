@@ -1,0 +1,46 @@
+version: "3.9"
+services: 
+  app:
+    build: .
+    container_name: my_app
+    ports:
+      - "3000:3000"
+    environment:
+      - MONGO_URL=mongodb://mongo:27017/mydb
+      - REDIS_URL=redis://redis:6379
+      - PORT=3000
+      - CACHE_TTL=300
+    networks:
+      - my_network
+    depends_on:
+      - mongo
+      - redis
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  mongo:
+    image: mongodb/mongodb-community-server:latest
+    container_name: mongo_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - my_network
+
+  redis:
+    image: redis/redis-stack:latest
+    container_name: redis-stack
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    networks:
+      - my_network
+
+networks:
+  my_network:
+    driver: bridge
+
+volumes:
+  mongo_data: 
