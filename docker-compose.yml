@@ -10,6 +10,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - PORT=3000
       - CACHE_TTL=300
+      - WORKER_CONCURRENCY=5
     networks:
       - my_network
     depends_on:

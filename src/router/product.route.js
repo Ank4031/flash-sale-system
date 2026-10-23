@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createProduct, getAllProducts, updateprice, buyProductRedis, updatequantity, deleteProduct, getProductById, buyProduct, initStock } from "../controllers/product.controller.js";
+import { createProduct, getAllProducts, updateprice, buyProductRedis, updatequantity, buyProductQueue, deleteProduct, getProductById, buyProduct, initStock } from "../controllers/product.controller.js";
 
 const productrouter = Router();
 
@@ -12,5 +12,6 @@ productrouter.delete("/delete/:prodId", deleteProduct);
 productrouter.post("/buy/:prodId", buyProduct);
 productrouter.get("/initstock/:prodId", initStock);
 productrouter.post("/buy_redis/:prodId", buyProductRedis);
+productrouter.post("/buy_queue/:prodId", buyProductQueue);
 
 export default productrouter;

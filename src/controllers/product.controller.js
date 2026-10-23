@@ -2,6 +2,7 @@ import { product } from "../models/product.model.js";
 import AsyncHandler from "../utilities/AsyncHandler.js";
 import {redisClient} from "../cache/redis.js";
 import mongoose from "mongoose";
+import { purchaseQueue } from "../queues/purchase.queue.js";
 
 const RESERVE_STOCK_LUA = `
 local stock = tonumber(redis.call('GET', KEYS[1]))
@@ -161,6 +162,28 @@ const initStock = AsyncHandler(async (req, res) => {
     return res.status(200).json({ message: "Stock initialized", product: prod });
 });
 
+const buyProductQueue = AsyncHandler(async (req, res) => {
+    const { prodId } = req.params;
+    if (!mongoose.isValidObjectId(prodId)) {
+        return res.status(400).json({ message: "Invalid product id" });
+    }
+    const stockKey = `stock:${prodId}`;
+
+    // Step 1: Redis check (same as before)
+    const result = await redisClient.eval(RESERVE_STOCK_LUA, 1, stockKey, 1);
+    if (result === -1) return res.status(409).json({ message: "Sale has not started" });
+    if (result === -2) return res.status(409).json({ message: "Sold out" });
+
+    // Step 2: hand the MongoDB update to the worker
+    try {
+        const job = await purchaseQueue.add("buy", { prodId });
+        return res.status(202).json({ message: "Purchase accepted", jobId: job.id });
+    } catch (err) {
+        await redisClient.incrby(stockKey, 1); // could not queue it, so give the unit back
+        throw err;
+    }
+});
+
 const deleteProduct = AsyncHandler(async (req, res) => {
     const { prodId } = req.params;
     const cacheKey = `product:${prodId}`;
@@ -175,4 +198,4 @@ const deleteProduct = AsyncHandler(async (req, res) => {
 })
 
 
-export { createProduct, getAllProducts, updateprice, updatequantity, deleteProduct, getProductById, buyProduct, initStock, buy_naive, buyProductRedis };
+export { createProduct, getAllProducts, updateprice, updatequantity, deleteProduct, getProductById, buyProduct, initStock, buy_naive, buyProductRedis, buyProductQueue };
