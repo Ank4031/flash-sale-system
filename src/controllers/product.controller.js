@@ -1,12 +1,58 @@
 import { product } from "../models/product.model.js";
 import AsyncHandler from "../utilities/AsyncHandler.js";
 import {redisClient} from "../cache/redis.js";
+import mongoose from "mongoose";
+
+const RESERVE_STOCK_LUA = `
+local stock = tonumber(redis.call('GET', KEYS[1]))
+if not stock then return -1 end
+if stock < tonumber(ARGV[1]) then return -2 end
+return redis.call('DECRBY', KEYS[1], ARGV[1])
+`;
 
 const createProduct = AsyncHandler(async (req, res) => {
     const {name, description, price, quantity} = req.body;
     const newProduct = await product.create({name, description, price, quantity});
     console.log("New product created");
     res.status(201).json(newProduct);
+});
+
+const buyProductRedis = AsyncHandler(async (req, res) => {
+    const { prodId } = req.params;
+    if (!mongoose.isValidObjectId(prodId)) {
+        return res.status(400).json({ message: "Invalid product id" });
+    }
+    const stockKey = `stock:${prodId}`;
+
+    // Step 1: ask Redis for permission
+    const result = await redisClient.eval(RESERVE_STOCK_LUA, 1, stockKey, 1);
+    if (result === -1) {
+        return res.status(409).json({ message: "Sale has not started" });
+    }
+    if (result === -2) {
+        return res.status(409).json({ message: "Sold out" });
+    }
+
+    // Step 2: Redis approved, so update MongoDB
+    let prod;
+    try {
+        prod = await product.findOneAndUpdate(
+            { _id: prodId, quantity: { $gte: 1 } },
+            { $inc: { quantity: -1 } },
+            { returnDocument: "after" }
+        );
+    } catch (err) {
+        await redisClient.incrby(stockKey, 1); // MongoDB failed, give the unit back
+        throw err;
+    }
+    if (!prod) {
+        return res.status(409).json({ message: "Product is out of stock" });
+    }
+
+    // Step 3: clear stale caches
+    await redisClient.del(`product:${prodId}`);
+    await redisClient.del("allproduct:1");
+    return res.status(200).json({ message: "Product purchased successfully", product: prod });
 });
 
 const getProductById = AsyncHandler(async (req, res) => {
@@ -129,4 +175,4 @@ const deleteProduct = AsyncHandler(async (req, res) => {
 })
 
 
-export { createProduct, getAllProducts, updateprice, updatequantity, deleteProduct, getProductById, buyProduct, initStock };
+export { createProduct, getAllProducts, updateprice, updatequantity, deleteProduct, getProductById, buyProduct, initStock, buy_naive, buyProductRedis };
