@@ -67,6 +67,54 @@ const updatequantity = AsyncHandler(async (req, res) => {
     return res.status(200).json(prod);
 })
 
+const buy_naive = AsyncHandler(async (req, res) => {
+    const {prodId} = req.params;
+    const cacheKey = `product:${prodId}`;
+    const prod = await product.findById(prodId);
+    if (!prod) {
+        return res.status(404).json({ message: "Product not found" });
+    }
+    if (prod.quantity <= 0) {
+        return res.status(400).json({ message: "Product is out of stock" });
+    }
+    prod.quantity -= 1;
+    await prod.save();
+    await redisClient.set(cacheKey, JSON.stringify(prod), "EX", process.env.CACHE_TTL || 300);
+    await redisClient.del("allproduct:1");
+    console.log("Product purchased and cache updated");
+    return res.status(200).json({ message: "Product purchased successfully", product: prod });
+});
+
+const buyProduct = AsyncHandler(async (req, res) => {
+    const {prodId} = req.params;
+    const cacheKey = `product:${prodId}`;
+    const prod = await product.findOneAndUpdate(
+        { _id: prodId, quantity: { $gte: 1 } },  // condition
+        { $inc: { quantity: -1 } },               // action
+        { returnDocument: "after" }
+    );
+    if (!prod) {
+        const exists = await product.exists({ _id: prodId });
+        return exists
+            ? res.status(409).json({ message: "Product is out of stock" })
+            : res.status(404).json({ message: "Product not found" });
+    }
+    await redisClient.del(cacheKey);
+    await redisClient.del("allproduct:1");
+    return res.status(200).json({ message: "Product purchased successfully", product: prod });
+});
+
+const initStock = AsyncHandler(async (req, res) => {
+    const {prodId} = req.params;
+    const cacheKey = `stock:${prodId}`;
+    const prod = await product.findById(prodId);
+    if (!prod) {
+        return res.status(404).json({ message: "Product not found" });
+    }
+    await redisClient.set(cacheKey, prod.quantity, "EX", process.env.CACHE_TTL || 900, "NX");
+    return res.status(200).json({ message: "Stock initialized", product: prod });
+});
+
 const deleteProduct = AsyncHandler(async (req, res) => {
     const { prodId } = req.params;
     const cacheKey = `product:${prodId}`;
@@ -80,4 +128,5 @@ const deleteProduct = AsyncHandler(async (req, res) => {
     return res.status(200).json({ message: "Product deleted successfully" });
 })
 
-export { createProduct, getAllProducts, updateprice, updatequantity, deleteProduct, getProductById };
+
+export { createProduct, getAllProducts, updateprice, updatequantity, deleteProduct, getProductById, buyProduct, initStock };
